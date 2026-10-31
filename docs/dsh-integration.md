@@ -37,7 +37,12 @@ DSH 看到的是 junction，改仓库里的 `SKILL.md`，DSH 侧立刻就是新�
 
 ## 三、需要「真人输入」时：配合 Cua
 
-HTML5 拖放、DevTools 取色器这类**只认真实 OS 输入**的东西，BiDi 的 `input.performActions` 和 PostMessage 都不行。
+有两类动作绕不过去，但原因不同——**不是「BiDi 支持不了」这么笼统**：
+
+- **HTML5 拖放**：BiDi 的 input 模块只有 `performActions` / `releaseActions` / `setFiles`，没有 CDP 那种 `Input.dispatchDragEvent`，只能用 pointer actions 模拟；而 Firefox 的模拟拖放有**未修复**的上游 bug（Bugzilla 1515879「HTML5 drag and drop doesn't work」，`resolution` 为空、无人认领），合成的 move 不会变成 `dragover`/`drop`。
+- **DevTools 取色器**：这是 DevTools 私有 API（`inspector.pickColorFromPage`），**不在 BiDi 规范范围内**；且 Firefox 的实现要求真实指针事件，合成点击不认。
+
+⇒ 这类用 **Cua**（真 SendInput/UIA）配合本 MCP：
 
 ⇒ 改用 **Cua**（真 SendInput/UIA）配合本 MCP：
 
