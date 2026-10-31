@@ -1,7 +1,7 @@
 /**
  * dsh-browser-mcp — an MCP server that drives the whole Firefox browser.
  *
- * Design notes:
+ * Design (see `.investigations/000-架构设计/架构设计-MCP化.md`):
  *  - ONE channel: a direct WebDriver BiDi WebSocket to Firefox. Page-level
  *    work (DOM, click, input, screenshots, network) and browser-chrome work
  *    (toolbars, prefs, windows, add-ons) both go through it — the chrome side
@@ -11,7 +11,7 @@
  *  - Firefox must be launched with `--remote-debugging-port=<port>` and, to
  *    reach the chrome context, `MOZ_REMOTE_ALLOW_SYSTEM_ACCESS=1`.
  *
- * Human-in-the-loop (decided 2026-10-15): approval lives on the *MCP client*
+ * Human-in-the-loop (design decision): approval lives on the *MCP client*
  * side, not in the browser. Every tool therefore carries `annotations`, so a
  * client can require confirmation before the tools that actually change
  * something: `readOnlyHint: false` marks those, and `destructiveHint: true`
@@ -344,7 +344,7 @@ async function withPage<T>(
   tab?: string,
 ): Promise<T> {
   return await withBidi(async (client) => {
-    // 2026-10-31: an explicit tab context beats the active tab, so callers can
+    // An explicit tab context beats the active tab, so callers can
     // pin their own window and never touch whatever tab the user has in front.
     const context = tab !== undefined && tab !== '' ? tab : await client.pageContext()
     if (context === null) throw new Error('no page context available')
@@ -787,16 +787,17 @@ serveStdio(() => {
       inputSchema: {
         selector: z.string().describe('CSS selector of the file input'),
         files: z.array(z.string()).describe('Native absolute paths of the files to attach'),
+        context: z.string().optional().describe('Tab context id (default: the active tab)'),
       },
       annotations: WRITES,
     },
-    async ({ selector, files }: { selector: string; files: string[] }) => {
+    async ({ selector, files, context: tab }: { selector: string; files: string[]; context?: string }) => {
       try {
         const css = str(selector, 'selector')
         if (!Array.isArray(files) || files.length === 0) throw new Error('files must be a non-empty array')
         await withPage(async (client, context) => {
           await client.setFiles(css, files, context)
-        })
+        }, tab)
         return text('attached ' + String(files.length) + ' file(s) to ' + css + ': ' + files.join(', '))
       } catch (error) {
         return failure(error)
@@ -950,10 +951,11 @@ serveStdio(() => {
       inputSchema: {
         landscape: z.boolean().optional().describe('Landscape orientation (default false)'),
         printBackground: z.boolean().optional().describe('Print background colours and images (default true)'),
+        context: z.string().optional().describe('Tab context id (default: the active tab)'),
       },
       annotations: READ_ONLY,
     },
-    async ({ landscape, printBackground }: { landscape?: boolean; printBackground?: boolean }) => {
+    async ({ landscape, printBackground, context: tab }: { landscape?: boolean; printBackground?: boolean; context?: string }) => {
       try {
         return text(
           await withPage(async (client, context) => {
@@ -964,7 +966,7 @@ serveStdio(() => {
             })) as { data?: string }
             if (typeof result?.data !== 'string') throw new Error('print returned no data')
             return 'data:application/pdf;base64,' + result.data
-          }),
+          }, tab),
           'pdf',
         )
       } catch (error) {
@@ -977,7 +979,7 @@ serveStdio(() => {
     'browser_set_download_dir',
     {
       title: 'Set the download directory',
-      // RESOLVED (2026-10-17): earlier attempts appeared to 'hang' purely because the caller sent
+      // RESOLVED: earlier attempts appeared to 'hang' purely because the caller sent
       // the path with single backslashes inside a JSON string (D:\DSH... -> \D and \T are invalid JSON
       // escapes), so the request never reached this handler. Sent with forward slashes the tool replies
       // immediately, and the earlier 'side effect happened but no reply' observation is consistent with a
@@ -1289,6 +1291,7 @@ serveStdio(() => {
         height: z.number().int().positive().optional().describe('Viewport height in CSS pixels'),
         devicePixelRatio: z.number().positive().optional().describe('Device pixel ratio override'),
         clear: z.boolean().optional().describe('Remove the override (sent as viewport=null with devicePixelRatio omitted)'),
+        context: z.string().optional().describe('Tab context id (default: the active tab)'),
       },
       annotations: WRITES_PERSISTENTLY,
     },
@@ -1297,11 +1300,13 @@ serveStdio(() => {
       height,
       devicePixelRatio,
       clear,
+      context: tab,
     }: {
       width?: number
       height?: number
       devicePixelRatio?: number
       clear?: boolean
+      context?: string
     }) => {
       try {
         return text(
@@ -1312,7 +1317,7 @@ serveStdio(() => {
             )
             const viewport =
               clear === true || width === undefined || height === undefined ? null : { width, height }
-            // MEASURED (2026-10-17): sending viewport:null AND devicePixelRatio:null together
+            // MEASURED: sending viewport:null AND devicePixelRatio:null together
             // times out. Clearing works when devicePixelRatio is simply omitted, so only include
             // it when the caller asked for one.
             const params: Record<string, unknown> = { context, viewport }
@@ -1340,7 +1345,7 @@ serveStdio(() => {
                   'note: setViewport(view=null) timed out, but clearing is known to take effect — the value above is read back from the page.'
                 : '')
             )
-          }),
+          }, tab),
         )
       } catch (error) {
         return failure(error)
@@ -1458,7 +1463,7 @@ serveStdio(() => {
       description:
         'Ask the connected Firefox to exit (browser.close). This tears down the browser and this server loses its ' +
         'connection until Firefox is started again, so use it deliberately. ' +
-        'LIMIT (measured 2026-10-17): it CANNOT rescue an already-leaked session. Firefox allows ONE active BiDi ' +
+        'LIMIT (measured): it CANNOT rescue an already-leaked session. Firefox allows ONE active BiDi ' +
         'session; when a client is killed with SIGKILL it never sends session.end, every call — including this one, ' +
         'since it must open a session too — fails with "Maximum number of active sessions". In that state only ' +
         'restarting Firefox externally helps. What this tool does give you is a clean, orderly shutdown while a ' +
@@ -4088,14 +4093,15 @@ serveStdio(() => {
         url: z.string().optional().describe('URL to show (default: the current page)'),
         width: z.number().int().positive().optional().describe('Window width (default 320)'),
         height: z.number().int().positive().optional().describe('Window height (default 240)'),
+        context: z.string().optional().describe('Tab context id (default: the active tab)'),
       },
       annotations: WRITES,
     },
-    async ({ url, width, height }: { url?: string; width?: number; height?: number }) => {
+    async ({ url, width, height, context: tab }: { url?: string; width?: number; height?: number; context?: string }) => {
       try {
         return text(
           await withBidi(async (client) => {
-            const context = (await client.pageContext()) as string
+            const context = tab ?? ((await client.pageContext()) as string)
             // 1. Satisfy "requires user activation" with a genuine input action.
             try {
               await client.call('input.performActions', {
@@ -4639,14 +4645,16 @@ serveStdio(() => {
       description:
         'Inspect the page for login/registration forms: each form id and action, plus its input fields with name, ' +
         'type and autocomplete hint. Use this before filling a form so the field names are known instead of guessed.',
-      inputSchema: {},
+      inputSchema: {
+        context: z.string().optional().describe('Tab context id (default: the active tab)'),
+      },
       annotations: READ_ONLY,
     },
-    async () => {
+    async ({ context: tab }: { context?: string }) => {
       try {
         return text(
           await withBidi(async (client) => {
-            const context = (await client.pageContext()) as string
+            const context = tab ?? ((await client.pageContext()) as string)
             const raw = await client.evaluate(
               '(() => {' +
                 ' const forms = Array.from(document.forms).map(f => ({' +
@@ -4709,6 +4717,7 @@ serveStdio(() => {
         usernameSelector: z.string().optional().describe('CSS selector for the username field (default: form autocomplete=username, else first text input in the form)'),
         passwordSelector: z.string().optional().describe('CSS selector for the password field (default: form autocomplete=current-password, else first password input)'),
         submit: z.boolean().optional().describe('Submit the form afterwards (default false — fill only)'),
+        context: z.string().optional().describe('Tab context id (default: the active tab)'),
       },
       annotations: WRITES,
     },
@@ -4718,19 +4727,21 @@ serveStdio(() => {
       usernameSelector,
       passwordSelector,
       submit,
+      context: tab,
     }: {
       username: string
       password: string
       usernameSelector?: string
       passwordSelector?: string
       submit?: boolean
+      context?: string
     }) => {
       try {
         const userSel = usernameSelector === undefined ? null : str(usernameSelector, 'usernameSelector')
         const passSel = passwordSelector === undefined ? null : str(passwordSelector, 'passwordSelector')
         return text(
           await withBidi(async (client) => {
-            const context = (await client.pageContext()) as string
+            const context = tab ?? ((await client.pageContext()) as string)
             // typeInto() takes a CSS selector, not a JS expression, so tag the two fields
             // with throwaway ids first and then address them as #selector.
             const tag = await client.evaluate(
@@ -4957,6 +4968,7 @@ serveStdio(() => {
         toX: z.number().optional().describe('Target viewport x'),
         toY: z.number().optional().describe('Target viewport y'),
         steps: z.number().int().min(1).max(60).optional().describe('Intermediate move steps (default 12)'),
+        context: z.string().optional().describe('Tab context id (default: the active tab)'),
       },
       annotations: WRITES,
     },
@@ -4968,6 +4980,7 @@ serveStdio(() => {
       toX,
       toY,
       steps,
+      context: tab,
     }: {
       fromSelector?: string
       fromX?: number
@@ -4976,6 +4989,7 @@ serveStdio(() => {
       toX?: number
       toY?: number
       steps?: number
+      context?: string
     }) => {
       try {
         const fromSel = fromSelector === undefined ? null : str(fromSelector, 'fromSelector')
@@ -4984,7 +4998,7 @@ serveStdio(() => {
         if (toSel === null && (toX === undefined || toY === undefined)) throw new Error('give toSelector or toX/toY')
         return text(
           await withBidi(async (client) => {
-            const context = (await client.pageContext()) as string
+            const context = tab ?? ((await client.pageContext()) as string)
             const centre = async (sel: string): Promise<{ x: number; y: number }> => {
               const raw = await client.evaluate(
                 '(() => { const el = document.querySelector(' + JSON.stringify(sel) + ');' +
@@ -5184,16 +5198,17 @@ serveStdio(() => {
         key: z.string().describe('Key to hold (e.g. "ArrowRight", "w")'),
         durationMs: z.number().int().min(1).max(10000).describe('How long to hold, in milliseconds'),
         modifiers: z.array(z.enum(['Control', 'Shift', 'Alt', 'Meta'])).optional().describe('Modifiers held at the same time'),
+        context: z.string().optional().describe('Tab context id (default: the active tab)'),
       },
       annotations: WRITES,
     },
-    async ({ key, durationMs, modifiers }: { key: string; durationMs: number; modifiers?: string[] }) => {
+    async ({ key, durationMs, modifiers, context: tab }: { key: string; durationMs: number; modifiers?: string[]; context?: string }) => {
       try {
         const main = str(key, 'key')
         const mods = modifiers ?? []
         return text(
           await withBidi(async (client) => {
-            const context = (await client.pageContext()) as string
+            const context = tab ?? ((await client.pageContext()) as string)
             const down: Array<{ type: string; value: string }> = []
             for (const mod of mods) down.push({ type: 'keyDown', value: webdriverKey(mod) })
             down.push({ type: 'keyDown', value: webdriverKey(main) })
@@ -5236,6 +5251,7 @@ serveStdio(() => {
         count: z.number().int().min(1).max(3).optional().describe('Click count: 1 single, 2 double (default 1)'),
         holdMs: z.number().int().min(0).max(10000).optional().describe('Hold the button this long before releasing (default 0)'),
         modifiers: z.array(z.enum(['Control', 'Shift', 'Alt', 'Meta'])).optional().describe('Modifiers held during the click'),
+        context: z.string().optional().describe('Tab context id (default: the active tab)'),
       },
       annotations: WRITES,
     },
@@ -5247,6 +5263,7 @@ serveStdio(() => {
       count,
       holdMs,
       modifiers,
+      context: tab,
     }: {
       selector?: string
       x?: number
@@ -5255,6 +5272,7 @@ serveStdio(() => {
       count?: number
       holdMs?: number
       modifiers?: string[]
+      context?: string
     }) => {
       try {
         const sel = selector === undefined ? null : str(selector, 'selector')
@@ -5266,7 +5284,7 @@ serveStdio(() => {
         const mods = modifiers ?? []
         return text(
           await withBidi(async (client) => {
-            const context = (await client.pageContext()) as string
+            const context = tab ?? ((await client.pageContext()) as string)
             let px = x ?? 0
             let py = y ?? 0
             let label = 'at ' + String(px) + ',' + String(py)

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Launch a Firefox instance that dsh-browser-mcp can attach to.
+ * Launch a Firefox instance that firefox-bidi-mcp can attach to.
  *
  * Why this is a separate script and not an MCP tool: the MCP server attaches to
  * an ALREADY RUNNING browser over its BiDi port. Starting that browser is an
@@ -73,7 +73,7 @@ function parseArgs(argv) {
 function usage() {
   console.log(
     [
-      'Launch Firefox for dsh-browser-mcp.',
+      'Launch Firefox for firefox-bidi-mcp.',
       '',
       '  node scripts/launch-firefox.mjs --profile <dir> [--port 9222] [--firefox <exe>]',
       '                                  [--no-system-access] [--headless]',

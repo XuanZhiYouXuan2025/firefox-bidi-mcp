@@ -1,5 +1,5 @@
 {
-  "name": "dsh-browser-mcp",
+  "name": "firefox-bidi-mcp",
   "version": "0.1.0",
   "description": "Firefox browser automation MCP server over WebDriver BiDi — drive a real Firefox from any MCP client",
   "type": "module",
@@ -20,7 +20,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/XuanZhiYouXuan2025/dsh-browser-mcp.git"
+    "url": "git+https://github.com/XuanZhiYouXuan2025/firefox-bidi-mcp.git"
   },
   "engines": {
     "node": ">=20"

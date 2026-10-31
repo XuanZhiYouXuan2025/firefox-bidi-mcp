@@ -2,7 +2,7 @@
 
 > 这里放「读过就少踩一次」的知识：Firefox 内部 API 的反直觉行为、工具实现层面的坑、以及实测结论。
 >
-> **这不是必读文档**。操作纪律见 [`../skills/browser-mcp/SKILL.md`](../skills/browser-mcp/SKILL.md)；本文件按需查。
+> **这不是必读文档**。操作纪律见 [`../skills/firefox-bidi-mcp/SKILL.md`](../skills/firefox-bidi-mcp/SKILL.md)；本文件按需查。
 
 ## 一、Firefox 内部 API：看起来是限制，其实是用法错了
 

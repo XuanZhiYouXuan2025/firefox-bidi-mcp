@@ -1,4 +1,4 @@
-# dsh-browser-mcp
+# firefox-bidi-mcp
 
 通过 WebDriver BiDi 控制真实 Firefox 的 MCP server —— 177 个 `browser_*` 工具，覆盖网页、标签页、窗口、书签历史、设置、扩展、DevTools、翻译、证书等 17 个域。
 
@@ -20,8 +20,8 @@
 ## 安装
 
 ```bash
-git clone https://github.com/XuanZhiYouXuan2025/dsh-browser-mcp.git
-cd dsh-browser-mcp
+git clone https://github.com/XuanZhiYouXuan2025/firefox-bidi-mcp.git
+cd firefox-bidi-mcp
 npm install
 npm run build
 ```
@@ -47,7 +47,7 @@ node scripts/launch-firefox.mjs --profile <profile目录> --port 9222
   "mcpServers": {
     "browser": {
       "command": "node",
-      "args": ["<绝对路径>/dsh-browser-mcp/dist/index.js"],
+      "args": ["<绝对路径>/firefox-bidi-mcp/dist/index.js"],
       "env": { "DSH_BROWSER_BIDI_PORT": "9222" }
     }
   }
@@ -64,7 +64,7 @@ node scripts/launch-firefox.mjs --profile <profile目录> --port 9222
 
 ## 工具
 
-177 个 `browser_*` 工具的分组速查见 [`skills/browser-mcp/references/tools.md`](skills/browser-mcp/references/tools.md)。
+177 个 `browser_*` 工具的分组速查见 [`skills/firefox-bidi-mcp/references/tools.md`](skills/firefox-bidi-mcp/references/tools.md)。
 
 ⚠️ 该文件由 `npm run gen-docs` 从 `src/index.ts` 生成，**不要手改**；要加工具请改源码后重跑。
 
@@ -84,7 +84,7 @@ Firefox 内部 API 的反直觉行为、工具实现层面的坑、会话泄漏�
 
 ## 给 DSH 用户（可选）
 
-仓库内的 `skills/browser-mcp/` 是一个 DeepSeek Harness 技能，记录了这个 server 的使用纪律。**非 DSH 用户不需要它**；DSH 专属内容（技能安装、实例占着浏览器时的处置、与 Cua 配合做「真人输入」）见 [`docs/dsh-integration.md`](docs/dsh-integration.md)。
+仓库内的 `skills/firefox-bidi-mcp/` 是一个 DeepSeek Harness 技能，记录了这个 server 的使用纪律。**非 DSH 用户不需要它**；DSH 专属内容（技能安装、实例占着浏览器时的处置、与 Cua 配合做「真人输入」）见 [`docs/dsh-integration.md`](docs/dsh-integration.md)。
 
 ```powershell
 # Windows：把技能以 junction 挂进 DSH 的 skills 目录

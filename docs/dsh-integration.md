@@ -4,7 +4,7 @@
 
 ## 一、安装技能
 
-`skills/browser-mcp/` 是一个 DSH 技能。Windows 下以 junction 方式挂进 DSH 的 skills 目录：
+`skills/firefox-bidi-mcp/` 是一个 DSH 技能。Windows 下以 junction 方式挂进 DSH 的 skills 目录：
 
 ```powershell
 ./scripts/install-skill.ps1 -DshHome <你的 DSH_HOME>

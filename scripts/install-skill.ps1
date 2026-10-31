@@ -1,9 +1,9 @@
 <#
 .SYNOPSIS
-  把本仓库的 skills/browser-mcp 挂进 DSH 的 skills 目录（junction，无需管理员）。
+  把本仓库的 skills/firefox-bidi-mcp 挂进 DSH 的 skills 目录（junction，无需管理员）。
 
 .DESCRIPTION
-  skill 跟着 MCP 仓库走 —— 源只有一份（skills/browser-mcp），
+  skill 跟着 MCP 仓库走 —— 源只有一份（skills/firefox-bidi-mcp），
   DSH 看到的是 junction。改了仓库里的 SKILL.md，DSH 侧立刻就是新的，不用复制。
 
 .PARAMETER DshHome
@@ -27,11 +27,11 @@ if (-not $DshHome) { throw '请设置 DSH_HOME，或用 -DshHome 指定' }
 if (-not (Test-Path $DshHome)) { throw "DSH_HOME 不存在: $DshHome" }
 
 $repo = Split-Path -Parent $PSScriptRoot
-$src = Join-Path $repo 'skills/browser-mcp'
+$src = Join-Path $repo 'skills/firefox-bidi-mcp'
 if (-not (Test-Path $src)) { throw "源目录不存在: $src" }
 
 $skillsDir = Join-Path $DshHome 'skills'
-$dst = Join-Path $skillsDir 'browser-mcp'
+$dst = Join-Path $skillsDir 'firefox-bidi-mcp'
 
 if ($Uninstall) {
   if (Test-Path $dst) {
@@ -72,4 +72,4 @@ if (-not (Test-Path $dst)) { throw 'junction 创建失败' }
 Write-Output "已安装: $dst -> $src"
 Write-Output ''
 Write-Output '验证：'
-Get-ChildItem $dst -Recurse -File | ForEach-Object { Write-Output ('  ' + $_.FullName.Replace($dst, 'browser-mcp')) }
+Get-ChildItem $dst -Recurse -File | ForEach-Object { Write-Output ('  ' + $_.FullName.Replace($dst, 'firefox-bidi-mcp')) }

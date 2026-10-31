@@ -1,12 +1,12 @@
 ---
-name: browser-mcp
-description: 用 dsh-browser-mcp 控制 Firefox —— 177 个 browser_* 工具的选择纪律、连接前提与安全边界
-whenToUse: 需要通过 dsh-browser-mcp 操作 Firefox（网页/标签页/窗口/书签历史/设置/扩展/DevTools/翻译/证书）时；或工具返回空对象、超时、看似不可用时
+name: firefox-bidi-mcp
+description: 用 firefox-bidi-mcp 控制 Firefox —— 177 个 browser_* 工具的选择纪律、连接前提与安全边界
+whenToUse: 需要通过 firefox-bidi-mcp 操作 Firefox（网页/标签页/窗口/书签历史/设置/扩展/DevTools/翻译/证书）时；或工具返回空对象、超时、看似不可用时
 ---
 
 # browser-mcp — Firefox 控制的总纪律
 
-> 服务：`dsh-browser-mcp`（177 个 `browser_*` 工具，17 个域）
+> 服务：`firefox-bidi-mcp`（177 个 `browser_*` 工具，17 个域）
 > 传输：BiDi（主）+ Marionette（仅 GPC 与个别内部 helper）
 > 工具清单：`references/tools.md`（由源码生成，⛔ 别手改）
 > 踩坑与实测记录：`docs/gotchas.md`（按需查，非必读）

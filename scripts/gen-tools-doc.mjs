@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Regenerate skills/browser-mcp/references/tools.md from src/index.ts.
+ * Regenerate skills/firefox-bidi-mcp/references/tools.md from src/index.ts.
  *
  * Why this exists: the tool list was hand-maintained and drifted — the README
  * said "23 tools" while the server registered 177. Generating the list from the
@@ -19,7 +19,7 @@ import { dirname, join } from 'node:path'
 const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, '..')
 const SRC = join(root, 'src/index.ts')
-const DOC = join(root, 'skills/browser-mcp/references/tools.md')
+const DOC = join(root, 'skills/firefox-bidi-mcp/references/tools.md')
 
 /** Collapse a multi-line description into one short sentence. */
 function brief(text) {
