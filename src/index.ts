@@ -24,6 +24,7 @@ import { serveStdio } from '@modelcontextprotocol/server/stdio'
 import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { inflateSync } from 'node:zlib'
 import { BidiClient } from './bidi/client.js'
 import { MarionetteClient, marionettePort } from './bidi/marionette.js'
 
@@ -337,6 +338,72 @@ function failure(error: unknown) {
     }
   }
   return { content: [{ type: 'text' as const, text: `error: ${message}` }], isError: true }
+}
+
+/**
+ * Minimal PNG decoder for BiDi screenshots: 8-bit, non-interlaced, colour type 0/2/6.
+ * Returns straight (non-premultiplied) RGBA.
+ */
+function decodePng(base64: string): { width: number; height: number; rgba: Uint8Array } {
+  const b64 = base64.includes(',') ? base64.slice(base64.indexOf(',') + 1) : base64
+  const buf = Buffer.from(b64, 'base64')
+  const SIG = [137, 80, 78, 71, 13, 10, 26, 10]
+  for (let i = 0; i < 8; i++) if (buf[i] !== SIG[i]) throw new Error('not a PNG')
+  let off = 8
+  let width = 0, height = 0, bitDepth = 0, colorType = 0, interlace = 0
+  const idat: Buffer[] = []
+  while (off + 8 <= buf.length) {
+    const len = buf.readUInt32BE(off)
+    const type = buf.toString('ascii', off + 4, off + 8)
+    const data = buf.subarray(off + 8, off + 8 + len)
+    if (type === 'IHDR') {
+      width = data.readUInt32BE(0); height = data.readUInt32BE(4)
+      bitDepth = data[8]; colorType = data[9]; interlace = data[12]
+    } else if (type === 'IDAT') idat.push(data)
+    else if (type === 'IEND') break
+    off += 12 + len
+  }
+  if (bitDepth !== 8) throw new Error('unsupported PNG bit depth ' + String(bitDepth))
+  if (interlace !== 0) throw new Error('interlaced PNG is not supported')
+  const channels = colorType === 6 ? 4 : colorType === 2 ? 3 : colorType === 0 ? 1 : 0
+  if (channels === 0) throw new Error('unsupported PNG colour type ' + String(colorType))
+  const raw = inflateSync(Buffer.concat(idat))
+  const stride = width * channels
+  const out = new Uint8Array(width * height * 4)
+  let prev = new Uint8Array(stride)
+  let pos = 0
+  for (let y = 0; y < height; y++) {
+    const filter = raw[pos++]
+    const line = new Uint8Array(stride)
+    for (let x = 0; x < stride; x++) line[x] = raw[pos + x]
+    pos += stride
+    for (let x = 0; x < stride; x++) {
+      const a = x >= channels ? line[x - channels] : 0
+      const b = prev[x]
+      const c = x >= channels ? prev[x - channels] : 0
+      let v = line[x]
+      if (filter === 1) v = (v + a) & 0xff
+      else if (filter === 2) v = (v + b) & 0xff
+      else if (filter === 3) v = (v + ((a + b) >> 1)) & 0xff
+      else if (filter === 4) {
+        const pp = a + b - c
+        const pa = Math.abs(pp - a), pb = Math.abs(pp - b), pc = Math.abs(pp - c)
+        const pr = pa <= pb && pa <= pc ? a : pb <= pc ? b : c
+        v = (v + pr) & 0xff
+      }
+      line[x] = v
+    }
+    for (let x = 0; x < width; x++) {
+      const si = x * channels
+      const di = (y * width + x) * 4
+      out[di] = line[si]
+      out[di + 1] = channels >= 3 ? line[si + 1] : line[si]
+      out[di + 2] = channels >= 3 ? line[si + 2] : line[si]
+      out[di + 3] = channels === 4 ? line[si + 3] : 255
+    }
+    prev = line
+  }
+  return { width, height, rgba: out }
 }
 
 async function withPage<T>(
@@ -968,6 +1035,59 @@ serveStdio(() => {
             return 'data:application/pdf;base64,' + result.data
           }, tab),
           'pdf',
+        )
+      } catch (error) {
+        return failure(error)
+      }
+    },
+  )
+
+  server.registerTool(
+    'browser_pick_color_at',
+    {
+      title: 'Read the colour of one viewport pixel',
+      description:
+        'Capture the viewport and return the colour at a CSS-pixel coordinate (x from the left, y from the top). ' +
+        'Fully deterministic: it decodes the screenshot in-process, so no eyedropper and no human click is needed. ' +
+        'Coordinates are CSS pixels; the screenshot is physical pixels, so devicePixelRatio is applied internally.',
+      inputSchema: {
+        x: z.number().describe('X in CSS pixels from the left edge of the viewport'),
+        y: z.number().describe('Y in CSS pixels from the top edge of the viewport'),
+        context: z.string().optional().describe('Tab context id (default: the active tab)'),
+      },
+      annotations: READ_ONLY,
+    },
+    async ({ x, y, context }: { x: number; y: number; context?: string }) => {
+      try {
+        const cx = Math.round(x)
+        const cy = Math.round(y)
+        if (!Number.isFinite(cx) || !Number.isFinite(cy)) throw new Error('x and y must be finite numbers')
+        return text(
+          await withPage(async (client, ctx) => {
+            const ratio = Number(await client.evaluate('window.devicePixelRatio', ctx))
+            const dpr = Number.isFinite(ratio) && ratio > 0 ? ratio : 1
+            const img = decodePng(await client.screenshot(ctx))
+            const sx = Math.round(cx * dpr)
+            const sy = Math.round(cy * dpr)
+            if (sx < 0 || sy < 0 || sx >= img.width || sy >= img.height) {
+              throw new Error(
+                '(' + String(cx) + ',' + String(cy) + ') is outside the captured area: viewport is ' +
+                  String(Math.floor(img.width / dpr)) + 'x' + String(Math.floor(img.height / dpr)) + ' CSS px',
+              )
+            }
+            const i = (sy * img.width + sx) * 4
+            const rr = img.rgba[i]
+            const gg = img.rgba[i + 1]
+            const bb = img.rgba[i + 2]
+            const aa = img.rgba[i + 3]
+            const hex = '#' + [rr, gg, bb].map(v => v.toString(16).padStart(2, '0')).join('')
+            return (
+              '(' + String(cx) + ',' + String(cy) + ') -> ' + hex +
+              '  rgb(' + String(rr) + ',' + String(gg) + ',' + String(bb) + ')' +
+              '  alpha ' + String(aa) + '/255' +
+              '  [physical ' + String(sx) + ',' + String(sy) + ' of ' + String(img.width) + 'x' + String(img.height) + ' @dpr ' + String(dpr) + ']'
+            )
+          }, context),
         )
       } catch (error) {
         return failure(error)
