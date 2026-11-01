@@ -1,0 +1,39 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - name: Verify tool count did not collapse
+        run: |
+          COUNT=$(grep -cF 'server.registerTool(' src/index.ts)
+          echo "registerTool calls: $COUNT"
+          if [ "$COUNT" -lt 100 ]; then
+            echo "::error::tool count dropped to $COUNT"
+            exit 1
+          fi
+
+      - name: Verify key tools exist
+        run: |
+          for t in browser_pick_color_at browser_drag_html5 browser_navigate browser_screenshot; do
+            if ! grep -qF "\$t" src/index.ts; then
+              echo "::error::missing tool \$t"
+              exit 1
+            fi
+          done
