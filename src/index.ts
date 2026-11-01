@@ -1,7 +1,7 @@
 /**
  * dsh-browser-mcp — an MCP server that drives the whole Firefox browser.
  *
- * Design (see `.investigations/000-架构设计/架构设计-MCP化.md`):
+ * Design notes:
  *  - ONE channel: a direct WebDriver BiDi WebSocket to Firefox. Page-level
  *    work (DOM, click, input, screenshots, network) and browser-chrome work
  *    (toolbars, prefs, windows, add-ons) both go through it — the chrome side
