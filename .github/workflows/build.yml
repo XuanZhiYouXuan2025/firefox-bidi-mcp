@@ -32,8 +32,9 @@ jobs:
       - name: Verify key tools exist
         run: |
           for t in browser_pick_color_at browser_drag_html5 browser_navigate browser_screenshot; do
-            if ! grep -qF "\$t" src/index.ts; then
-              echo "::error::missing tool \$t"
+            if ! grep -qF "$t" src/index.ts; then
+              echo "::error::missing tool $t"
               exit 1
             fi
           done
+          echo "all key tools present"
