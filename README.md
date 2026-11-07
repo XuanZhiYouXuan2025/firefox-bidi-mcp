@@ -10,6 +10,11 @@
 - **覆盖面广**：从点击输入、截图、网络，到改 prefs、装扩展、读书签历史与证书
 - **写操作有标记**：每个工具带 MCP `annotations`，客户端可据此对写操作/破坏性操作要求确认
 - **不劫持你的浏览器**：启动脚本永远另起实例，不会接管正在运行的 Firefox
+- **UID 寻址**：`browser_take_snapshot` 给可交互元素分配稳定 UID（`@e1`…），
+  `browser_click_by_uid` / `browser_fill_by_uid` 按 UID 操作；元素消失或页面导航后会**明确报错**，
+  而不是像 CSS 选择器那样悄悄选中别的元素
+- **可按需裁剪**：`DSH_BROWSER_TOOL_PRESET=slim` 只暴露 71 个（只读 + 必备页面动作），
+  `basic`（默认）暴露全部 187 个
 
 ## 前置条件
 
@@ -68,6 +73,10 @@ node scripts/launch-firefox.mjs --profile <profile目录> --port 9222
 
 ⚠️ 该文件由 `npm run gen-docs` 从 `src/tools/*.ts` 生成，**不要手改**；要加工具请改源码后重跑。
 
+工具分两档，用 `DSH_BROWSER_TOOL_PRESET` 选：`slim`（71 个：只读 + navigate/click/type/
+screenshot 等必备页面动作）与 `basic`（默认，全部 187 个）。只做浏览或采集的场景用 slim 能明显
+减少 `tools/list` 的上下文占用。
+
 Firefox 内部 API 的反直觉行为、工具实现层面的坑、会话泄漏的处置，见 [`docs/gotchas.md`](docs/gotchas.md) —— 按需查，不是必读。
 
 ## 安全模型
@@ -81,6 +90,8 @@ Firefox 内部 API 的反直觉行为、工具实现层面的坑、会话泄漏�
 - 一个 Firefox 实例同时只能有一个 BiDi 会话；客户端异常退出会**泄漏会话**，此时只能重启 Firefox
 - `browsing-context` id 每次 `session.new` 后都会变，**不要缓存**
 - 用 `Stop-Process -Force` 这类硬杀会跳过优雅退出，照样泄漏会话；优先关 stdin / `SIGINT` / `SIGTERM`
+- `browser_screencast` 在 Firefox 160.0 上**拿不到帧**：`startScreencast` 返回 OK，但没有
+  `browsingContext.screencastFrame` 事件到达（静态页与强制重绘都试过）。需要截图请用 `browser_screenshot`
 
 ## 给 DSH 用户（可选）
 

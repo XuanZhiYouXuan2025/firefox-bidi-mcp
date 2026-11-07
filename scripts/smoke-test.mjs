@@ -15,6 +15,7 @@
  * Exit code 0 = all checks passed, 1 = something failed.
  */
 import { spawn, execFileSync } from 'node:child_process'
+import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { existsSync, mkdirSync, rmSync } from 'node:fs'
@@ -22,7 +23,7 @@ import { existsSync, mkdirSync, rmSync } from 'node:fs'
 const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, '..')
 const PORT = Number(process.env.SMOKE_PORT ?? 9222)
-const PROFILE = process.env.SMOKE_PROFILE ?? 'D:\\DSH\\FirefoxProfiles\\BidiTest160'
+const PROFILE = process.env.SMOKE_PROFILE ?? join(tmpdir(), 'bidi-mcp-smoke-profile')
 const WANT_BROWSER = process.argv.includes('--browser') || process.argv.includes('--writes')
 const WRITE_TESTS = process.argv.includes('--writes')
 const EXPECTED_TOOLS = 187

@@ -90,5 +90,5 @@ npm run smoke:browser -- --writes   # 再加 activate_tab 的 chrome 回退测�
 | `DSH_BROWSER_OUTPUT_DIR` | 超大结果落盘目录（默认系统临时目录） |
 | `SMOKE_PROFILE` / `SMOKE_PORT` | 冒烟脚本用的测试档案与端口 |
 
-**测试纪律**：冒烟脚本用独立测试档案（默认 `D:\DSH\FirefoxProfiles\BidiTest160`），
+**测试纪律**：冒烟脚本用独立测试档案（默认 `<系统临时目录>/BidiTest160`，可用 `SMOKE_PROFILE` 覆盖），
 ⛔ 不碰主力实例与主力档案；脚本自己起停 Firefox，但档案目录要自己删。

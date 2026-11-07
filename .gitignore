@@ -3,4 +3,6 @@ dist/
 dist.bak*/
 *.bak*
 scripts/.launched/
+# per-site experience notes written at runtime by browser_site_note
+sites/
 *.log

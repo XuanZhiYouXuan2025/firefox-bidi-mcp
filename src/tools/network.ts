@@ -20,7 +20,7 @@ export function registerNetwork(server: McpServer): void {
     {
       title: 'Set the download directory',
       // RESOLVED (2026-10-17): earlier attempts appeared to 'hang' purely because the caller sent
-      // the path with single backslashes inside a JSON string (D:\DSH... -> \D and \T are invalid JSON
+      // the path with single backslashes inside a JSON string (D:\some-path... -> \D and \T are invalid JSON
       // escapes), so the request never reached this handler. Sent with forward slashes the tool replies
       // immediately, and the earlier 'side effect happened but no reply' observation is consistent with a
       // partially-mangled path. Nothing here needed fixing; diagnose with a forward-slash path first.
@@ -29,7 +29,7 @@ export function registerNetwork(server: McpServer): void {
         'browser.download.dir and browser.download.useDownloadDir=true. ' +
         'BiDi cannot configure downloads itself (browsingContext.setDownloadBehavior is not implemented), so the ' +
         'preferences are the supported route. Send the path with FORWARD slashes: single backslashes inside a JSON ' +
-        'string are invalid escapes (D:\DSH... fails on \D), the request is then dropped before reaching the ' +
+        'string are invalid escapes (D:\some-path... fails on \D), the request is then dropped before reaching the ' +
         'server, and it looks like the tool hung. Use browser_list_downloads to see what landed there.',
       inputSchema: { path: z.string().describe('Absolute directory to download into') },
       annotations: WRITES_PERSISTENTLY,
