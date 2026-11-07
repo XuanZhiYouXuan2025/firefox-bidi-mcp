@@ -22,17 +22,23 @@ jobs:
 
       - name: Verify tool count did not collapse
         run: |
-          COUNT=$(grep -cF 'server.registerTool(' src/index.ts)
-          echo "registerTool calls: $COUNT"
+          COUNT=$(grep -rhoF "defineTool(" src/tools | wc -l | tr -d ' ')
+          echo "defineTool calls: $COUNT"
           if [ "$COUNT" -lt 100 ]; then
             echo "::error::tool count dropped to $COUNT"
             exit 1
           fi
 
+      - name: Verify generated docs are current
+        run: npm run check-docs
+
+      - name: Verify skill files
+        run: npm run check-skill
+
       - name: Verify key tools exist
         run: |
           for t in browser_pick_color_at browser_drag_html5 browser_navigate browser_screenshot; do
-            if ! grep -qF "$t" src/index.ts; then
+            if ! grep -rqF "$t" src/tools; then
               echo "::error::missing tool $t"
               exit 1
             fi
