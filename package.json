@@ -7,6 +7,10 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "gen-docs": "node scripts/gen-tools-doc.mjs",
+    "check-docs": "node scripts/gen-tools-doc.mjs --check",
+    "check-skill": "node scripts/check-skill.mjs",
+    "smoke": "node scripts/smoke-test.mjs",
+    "smoke:browser": "node scripts/smoke-test.mjs --browser",
     "start": "node dist/index.js"
   },
   "keywords": [

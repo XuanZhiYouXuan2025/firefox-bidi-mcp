@@ -72,4 +72,4 @@ if (-not (Test-Path $dst)) { throw 'junction 创建失败' }
 Write-Output "已安装: $dst -> $src"
 Write-Output ''
 Write-Output '验证：'
-Get-ChildItem $dst -Recurse -File | ForEach-Object { Write-Output ('  ' + $_.FullName.Replace($dst, 'firefox-bidi-mcp')) }
+Get-ChildItem $dst -Recurse -File | ForEach-Object { Write-Output ('  ' + $_.FullName.Replace($dst, 'browser-mcp')) }

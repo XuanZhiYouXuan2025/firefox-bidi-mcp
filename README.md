@@ -1,6 +1,6 @@
 # firefox-bidi-mcp
 
-通过 WebDriver BiDi 控制真实 Firefox 的 MCP server —— 177 个 `browser_*` 工具，覆盖网页、标签页、窗口、书签历史、设置、扩展、DevTools、翻译、证书等 17 个域。
+通过 WebDriver BiDi 控制真实 Firefox 的 MCP server —— 187 个 `browser_*` 工具，覆盖网页、标签页、窗口、书签历史、设置、扩展、DevTools、翻译、证书等 21 个域。
 
 > An MCP server that drives a real Firefox over WebDriver BiDi.
 
@@ -64,9 +64,9 @@ node scripts/launch-firefox.mjs --profile <profile目录> --port 9222
 
 ## 工具
 
-177 个 `browser_*` 工具的分组速查见 [`skills/firefox-bidi-mcp/references/tools.md`](skills/firefox-bidi-mcp/references/tools.md)。
+187 个 `browser_*` 工具的分组速查见 [`skills/firefox-bidi-mcp/references/tools.md`](skills/firefox-bidi-mcp/references/tools.md)。
 
-⚠️ 该文件由 `npm run gen-docs` 从 `src/index.ts` 生成，**不要手改**；要加工具请改源码后重跑。
+⚠️ 该文件由 `npm run gen-docs` 从 `src/tools/*.ts` 生成，**不要手改**；要加工具请改源码后重跑。
 
 Firefox 内部 API 的反直觉行为、工具实现层面的坑、会话泄漏的处置，见 [`docs/gotchas.md`](docs/gotchas.md) —— 按需查，不是必读。
 

@@ -1,25 +1,50 @@
 #!/usr/bin/env node
 /**
- * Regenerate skills/firefox-bidi-mcp/references/tools.md from src/index.ts.
+ * Regenerate skills/firefox-bidi-mcp/references/tools.md from src/tools/*.ts.
  *
- * Why this exists: the tool list was hand-maintained and drifted — the README
- * said "23 tools" while the server registered 177. Generating the list from the
- * source means adding a tool can never leave the docs stale again.
- *
- * Grouping still comes from the existing tools.md (domain order is a human
- * choice), but every name/description is read from the source. Run with:
+ * History: this used to parse src/index.ts, because every tool was registered
+ * there. After the 2026-11-07 refactor the tools live in 20 domain modules and
+ * are registered through defineTool(), so the source of truth is now the tools
+ * directory and the group order comes from that directory too (no hand-kept
+ * grouping table to drift).
  *
  *   node scripts/gen-tools-doc.mjs           # rewrite in place
  *   node scripts/gen-tools-doc.mjs --check   # exit 1 if the file is stale
  */
-import { readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, '..')
-const SRC = join(root, 'src/index.ts')
+const TOOLS_DIR = join(root, 'src/tools')
+const INDEX = join(root, 'src/index.ts')
 const DOC = join(root, 'skills/firefox-bidi-mcp/references/tools.md')
+
+/** Domain module -> human title. Order here is the order in the document. */
+const DOMAINS = [
+  ['page.ts', '页面操作'],
+  ['tabs.ts', '标签页'],
+  ['tab-ops.ts', '标签页进阶'],
+  ['windows.ts', '窗口与视口'],
+  ['ui.ts', '工具栏与侧栏'],
+  ['bookmarks.ts', '书签'],
+  ['history.ts', '历史'],
+  ['network.ts', '网络与下载'],
+  ['storage.ts', 'Cookie / 缓存 / 站点数据'],
+  ['logins.ts', '密码与自动填充'],
+  ['prefs.ts', '设置'],
+  ['addons.ts', '扩展与主题'],
+  ['extensions.ts', '扩展与篡改猴'],
+  ['info.ts', '档案与诊断'],
+  ['devtools.ts', '开发者工具'],
+  ['automation.ts', '自动化标记与 GPC'],
+  ['certificates.ts', '证书'],
+  ['prompts.ts', '弹窗与导航历史'],
+  ['input-ext.ts', '输入扩展（拖拽/长按/上传）'],
+  ['misc.ts', '同步与杂项'],
+  ['profiler.ts', '性能分析'],
+]
 
 /** Collapse a multi-line description into one short sentence. */
 function brief(text) {
@@ -30,120 +55,84 @@ function brief(text) {
   return first.slice(0, 93).replace(/[,;:\s]+\S*$/, '') + '…'
 }
 
-function parseTools(src) {
-  const tools = new Map()
-  // Each tool starts at server.registerTool( and the name is the first
-  // single-quoted string on the following line.
-  const re = /server\.registerTool\(\s*\n\s*'([a-z0-9_]+)'\s*,\s*\n\s*\{/g
+/** Pull name + description out of one source file. */
+function parseFile(src) {
+  const out = []
+  const re = /defineTool\(\s*server\s*,\s*'([a-z0-9_]+)'\s*,\s*\{/g
   let m
   while ((m = re.exec(src)) !== null) {
     const name = m[1]
-    const start = m.index
-    // Description lives in the `description:` field of the metadata object.
-    const tail = src.slice(start, start + 4000)
+    const tail = src.slice(m.index, m.index + 6000)
+    // description: '...' + '...' (possibly multi-line, possibly several parts)
     const d = tail.match(/description:\s*\n?((?:\s*'[^']*'\s*\+?\s*\n?)+)/)
     let desc = ''
-    if (d) {
-      desc = [...d[1].matchAll(/'([^']*)'/g)].map((x) => x[1]).join('')
-    }
-    tools.set(name, desc)
+    if (d) desc = [...d[1].matchAll(/'([^']*)'/g)].map((x) => x[1]).join('')
+    out.push({ name, desc })
   }
-  return tools
+  return out
 }
 
-function parseExistingGroups() {
-  if (!existsSync(DOC)) return []
-  const text = readFileSync(DOC, 'utf8')
-  const groups = []
-  const re = /^## (.+?)（(\d+)）\s*$/gm
+/** Tools still registered the old way (should be zero; reported if not). */
+function parseLegacy(src) {
+  const out = []
+  const re = /server\.registerTool\(\s*\n\s*'([a-z0-9_]+)'/g
   let m
-  while ((m = re.exec(text)) !== null) {
-    const title = m[1]
-    const after = text.slice(m.index + m[0].length)
-    const listEnd = after.indexOf('\n## ')
-    const block = listEnd === -1 ? after : after.slice(0, listEnd)
-    const head = block.split(/\n\s*\n/)[0]
-    // Two shapes are accepted so the generator can read both the old
-    // hand-written list (names separated by ·) and its own output
-    // ("- `name` — description").
-    let names
-    if (head.includes('`')) {
-      names = [...head.matchAll(/^- `([a-z0-9_]+)`/gm)].map((x) => x[1])
-    } else {
-      names = head
-        .split('·')
-        .map((s) => s.trim().replace(/^browser_/, ''))
-        .filter(Boolean)
-    }
-    groups.push({ title, names })
-  }
-  return groups
+  while ((m = re.exec(src)) !== null) out.push(m[1])
+  return out
 }
 
-const src = readFileSync(SRC, 'utf8')
-const tools = parseTools(src)
-if (tools.size === 0) {
-  console.error('✗ parsed 0 tools from src/index.ts — the regex no longer matches')
+const sections = []
+const seen = new Set()
+for (const [file, title] of DOMAINS) {
+  const full = join(TOOLS_DIR, file)
+  if (!existsSync(full)) continue
+  const tools = parseFile(readFileSync(full, 'utf8'))
+  const fresh = tools.filter((t) => !seen.has(t.name))
+  for (const t of fresh) seen.add(t.name)
+  if (fresh.length > 0) sections.push({ title, tools: fresh })
+}
+
+// Anything left in index.ts or in a module not listed above must not vanish.
+const leftovers = []
+if (existsSync(INDEX)) leftovers.push(...parseLegacy(readFileSync(INDEX, 'utf8')))
+for (const f of readdirSync(TOOLS_DIR)) {
+  if (!f.endsWith('.ts')) continue
+  if (DOMAINS.some(([d]) => d === f)) continue
+  for (const t of parseFile(readFileSync(join(TOOLS_DIR, f), 'utf8'))) {
+    if (!seen.has(t.name)) { seen.add(t.name); leftovers.push(t.name) }
+  }
+}
+if (leftovers.length > 0) {
+  sections.push({ title: '新增待归类', tools: leftovers.map((n) => ({ name: n, desc: '' })) })
+}
+
+const total = seen.size
+if (total === 0) {
+  console.error('✗ parsed 0 tools from src/tools/*.ts — the defineTool regex no longer matches')
   process.exit(1)
 }
 
-// Tools that exist in source but were never listed in the hand-written doc.
-// Filed here explicitly so the generator does not need a catch-all bucket.
-const EXTRA = [
-  { title: '开发者工具', names: ['browser_console'] },
-  {
-    title: '批量导入（从外部数据迁移）',
-    names: ['import_cookies', 'import_cookies_from_file', 'import_logins_from_file', 'import_history'],
-  },
-]
-
-const groups = parseExistingGroups()
-for (const extra of EXTRA) {
-  const g = groups.find((x) => x.title === extra.title)
-  if (g) {
-    for (const n of extra.names) if (!g.names.includes(n)) g.names.push(n)
-  } else {
-    groups.push({ title: extra.title, names: [...extra.names] })
-  }
-}
-const grouped = new Set()
-for (const g of groups) for (const n of g.names) grouped.add(n)
-
-// Anything registered in source but absent from the doc goes to a catch-all so
-// a newly added tool shows up immediately instead of silently vanishing.
-const missing = [...tools.keys()]
-  .map((n) => n.replace(/^browser_/, ''))
-  .filter((n) => !grouped.has(n))
-if (missing.length > 0) {
-  groups.push({ title: '新增待归类', names: missing })
-}
-
 const lines = []
-lines.push(`# ${tools.size} 个 browser_* 工具速查`)
+lines.push(`# ${total} 个 browser_* 工具速查`)
 lines.push('')
 lines.push('> 按域分组。下表名字省略 `browser_` 前缀，实际调用要带。')
-lines.push('> ⚠️ 本文件由 `scripts/gen-tools-doc.mjs` 从 `src/index.ts` 生成 —— 改工具请改源码后重跑，⛔ 别手改这里。')
+lines.push('> ⚠️ 本文件由 `scripts/gen-tools-doc.mjs` 从 `src/tools/*.ts` 生成 —— 改工具请改源码后重跑，⛔ 别手改这里。')
 lines.push('')
 
-let counted = 0
-for (const g of groups) {
-  const present = g.names.filter((n) => tools.has('browser_' + n))
-  if (present.length === 0) continue
-  counted += present.length
-  lines.push(`## ${g.title}（${present.length}）`)
+for (const s of sections) {
+  lines.push(`## ${s.title}（${s.tools.length}）`)
   lines.push('')
-  for (const n of present) {
-    const desc = brief(tools.get('browser_' + n) || '')
-    lines.push(desc ? `- \`${n}\` — ${desc}` : `- \`${n}\``)
+  for (const t of s.tools) {
+    const short = t.name.replace(/^browser_/, '')
+    const desc = brief(t.desc || '')
+    lines.push(desc ? `- \`${short}\` — ${desc}` : `- \`${short}\``)
   }
   lines.push('')
 }
 
 lines.push('---')
 lines.push('')
-lines.push(
-  `**合计 ${tools.size} 个 · 已归类 ${counted} · 未归类 ${tools.size - counted}**`,
-)
+lines.push(`**合计 ${total} 个 · 分 ${sections.length} 组**`)
 lines.push('')
 const out = lines.join('\n')
 
@@ -153,13 +142,11 @@ if (process.argv.includes('--check')) {
     console.error('✗ tools.md is stale — run: node scripts/gen-tools-doc.mjs')
     process.exit(1)
   }
-  console.log(`✓ tools.md is up to date (${tools.size} tools)`)
+  console.log(`✓ tools.md is up to date (${total} tools)`)
   process.exit(0)
 }
 
 writeFileSync(DOC, out, 'utf8')
 console.log(`✓ wrote ${DOC}`)
-console.log(`  ${tools.size} tools · ${groups.length} groups · ${counted} classified`)
-if (missing.length > 0) {
-  console.log(`  ⚠️ ${missing.length} new tool(s) filed under 新增待归类: ${missing.join(', ')}`)
-}
+console.log(`  ${total} tools · ${sections.length} groups`)
+if (leftovers.length > 0) console.log(`  ⚠️ ${leftovers.length} unclassified: ${leftovers.join(', ')}`)

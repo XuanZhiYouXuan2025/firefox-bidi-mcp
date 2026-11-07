@@ -4,7 +4,7 @@
 
 ## 一、安装技能
 
-`skills/firefox-bidi-mcp/` 是一个 DSH 技能。Windows 下以 junction 方式挂进 DSH 的 skills 目录：
+`skills/browser-mcp/` 是一个 DSH 技能。Windows 下以 junction 方式挂进 DSH 的 skills 目录：
 
 ```powershell
 ./scripts/install-skill.ps1 -DshHome <你的 DSH_HOME>
@@ -44,8 +44,6 @@ DSH 看到的是 junction，改仓库里的 `SKILL.md`，DSH 侧立刻就是新�
 
 ⇒ 这类用 **Cua**（真 SendInput/UIA）配合本 MCP：
 
-⇒ 改用 **Cua**（真 SendInput/UIA）配合本 MCP：
-
 1. `browser_element_screen_coords` 拿目标在**屏幕**上的坐标
 2. Cua 用坐标点击/拖拽
 
@@ -67,3 +65,30 @@ DSH 看到的是 junction，改仓库里的 `SKILL.md`，DSH 侧立刻就是新�
 1. **同一时刻只让一个实例启用**——Cua 不预留桌面，多实例会抢鼠标键盘
 2. **只做可逆动作**——已发出的输入收不回来；关键动作前先截图确认状态
 3. **原生崩溃可能带走宿主**——Cua 与 DSH 共享进程，崩了会终止该实例；别在主力上做高危桌面操作
+
+## 四、本地开发与验证（个人版）
+
+```bash
+npm install
+npm run build            # tsc
+npm run gen-docs         # 重生成 skills/browser-mcp/references/tools.md
+npm run smoke            # 协议层冒烟（不需要浏览器）
+npm run smoke:browser    # 起 Firefox + 18 个域只读调用 + 自动停
+npm run smoke:browser -- --writes   # 再加 activate_tab 的 chrome 回退测试
+```
+
+`smoke-test.mjs` 通过**真实 MCP stdio 协议**驱动 `dist/index.js`，所以它同时验证
+「能编译」和「能启动」。
+
+环境变量：
+
+| 变量 | 作用 |
+|---|---|
+| `DSH_BROWSER_BIDI_PORT` | BiDi 端口（默认 9222；MCP 会先读 dynamic-start 的端口文件） |
+| `DSH_BROWSER_MARIONETTE_PORT` | Marionette 端口（默认 2828，仅 GPC 等用） |
+| `DSH_BROWSER_MAX_OUTPUT_CHARS` | 单次工具返回上限（默认 1,000,000 字符） |
+| `DSH_BROWSER_OUTPUT_DIR` | 超大结果落盘目录（默认系统临时目录） |
+| `SMOKE_PROFILE` / `SMOKE_PORT` | 冒烟脚本用的测试档案与端口 |
+
+**测试纪律**：冒烟脚本用独立测试档案（默认 `D:\DSH\FirefoxProfiles\BidiTest160`），
+⛔ 不碰主力实例与主力档案；脚本自己起停 Firefox，但档案目录要自己删。

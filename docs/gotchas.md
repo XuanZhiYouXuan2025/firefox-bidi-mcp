@@ -2,7 +2,7 @@
 
 > 这里放「读过就少踩一次」的知识：Firefox 内部 API 的反直觉行为、工具实现层面的坑、以及实测结论。
 >
-> **这不是必读文档**。操作纪律见 [`../skills/firefox-bidi-mcp/SKILL.md`](../skills/firefox-bidi-mcp/SKILL.md)；本文件按需查。
+> **这不是必读文档**。操作纪律见 [`../skills/browser-mcp/SKILL.md`](../skills/browser-mcp/SKILL.md)；本文件按需查。
 
 ## 一、Firefox 内部 API：看起来是限制，其实是用法错了
 
@@ -95,4 +95,38 @@
 
 ### 影响
 
-原生拖放和交互式取色器都依赖这条通道（需要 content 进程里的特权执行点），因此在 159.0 上两者都做不到。替代见 [SKILL.md](../skills/firefox-bidi-mcp/SKILL.md) 与 [dsh-integration.md](dsh-integration.md)。
+原生拖放和交互式取色器都依赖这条通道（需要 content 进程里的特权执行点），因此在 159.0 上两者都做不到。替代见 [SKILL.md](../skills/browser-mcp/SKILL.md) 与 [dsh-integration.md](dsh-integration.md)。
+
+
+---
+
+## 三、重构与依赖（2026-11 个人版）
+
+### 依赖
+
+- **`npm install --no-save <pkg>` 会清空整个 node_modules** ⇒ 这个仓库曾经没有 `dependencies` 字段，
+  npm 把所有已装包当成 extraneous 移除（实测 `removed 102 packages`，ws/zod/typescript 全没）。
+  现在已锁定并提交 `package-lock.json`；⛔ 不要再用 `--no-save`。
+- **TypeScript 7 不再隐式加载 `@types/*`** ⇒ 升级到 7.x 后满屏 `Cannot find name 'Buffer'`，
+  要么留在 5.9.x，要么在 `tsconfig` 里显式写 `"types": ["node"]`。
+
+### 工具注册
+
+- **`server.registerTool` 的返回值必须自己包 `text()`** ⇒ 裸字符串在 MCP 响应里会变成 `{}`。
+  2026-11-07 起 178 个工具全部走 `defineTool`（`src/support/define-tool.ts`），包装器负责加信封
+  和把异常转成工具错误；新工具不要手写 try/catch + text()。
+- **批量搬运代码块要一次性收集位置再逆序删** ⇒ 分多轮按「原文件偏移」删，第二轮的偏移会落在
+  已经变短的字符串上，把相邻代码切断（实测出现 `Unterminated string literal`）。
+- **AST 比正则可靠** ⇒ 迁移工具块时用 TypeScript 编译器 API 取 `CallExpression` 的
+  `getStart/getEnd`，再用字符串切片替换；正则处理多行括号极易错。
+
+### 浏览器行为
+
+- **`browsingContext.activate` 拒绝 about: 特权页面** ⇒ `about:home` 等报
+  `does not support browsing contexts in privileged scope`；同一个 context 导航到 http 页就能激活。
+  160 与 159 的 activate 实现逐行相同，**不是版本回归**。工具已内置 chrome 侧
+  `gBrowser.selectedTab` 回退。
+- **`network.getData` 的 `bytes` 是 WebDriver 值节点** ⇒ `type === 'string'` 时 `value` 已经是
+  原始字节的 latin1 字符串；按 base64 解 146 KB 内容只会得到 4 个字节。按 `type` 分支。
+- **重复 `session.subscribe` 不会挂** ⇒ 裸连接实测同一事件重复订阅 2ms 返回。早期把它当
+  卡死根因是判断错误（已在提交 `3b7dc5c` 修正）；去重只是为了少发无用命令。

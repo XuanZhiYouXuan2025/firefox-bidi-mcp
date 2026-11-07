@@ -155,8 +155,33 @@ export class MarionetteClient {
       if (reply[1] !== id) continue // not ours; keep reading
       const payload = (reply[3] ?? {}) as Record<string, unknown>
       if (reply[2] !== null && reply[2] !== undefined) {
-        const error = String(reply[2])
-        const message = payload.message === undefined ? '' : String(payload.message)
+        // MEASURED: reply[2] is normally a string ("session not created"), but a
+        // rejected session can carry an object there. String(object) would turn
+        // the whole diagnostic into "[object Object]", which is exactly the
+        // unhelpful message this client used to surface.
+        const error =
+          typeof reply[2] === 'string'
+            ? reply[2]
+            : (() => {
+                try {
+                  return JSON.stringify(reply[2])
+                } catch {
+                  return String(reply[2])
+                }
+              })()
+        const rawMessage = (payload as { message?: unknown }).message
+        const message =
+          rawMessage === undefined
+            ? ''
+            : typeof rawMessage === 'string'
+              ? rawMessage
+              : (() => {
+                  try {
+                    return JSON.stringify(rawMessage)
+                  } catch {
+                    return String(rawMessage)
+                  }
+                })()
         throw new Error(error + (message === '' ? '' : ': ' + message))
       }
       return payload
@@ -167,6 +192,24 @@ export class MarionetteClient {
   async startChromeSession(): Promise<void> {
     await this.command('WebDriver:NewSession')
     await this.command('Marionette:SetContext', { value: 'chrome' })
+  }
+
+  /**
+   * End the WebDriver session, then close the socket.
+   *
+   * MEASURED: destroying the socket alone leaves the Marionette session behind
+   * on the Firefox side, and the NEXT connection then fails intermittently with
+   * a rejection whose text reads "[object Object]". A best-effort
+   * WebDriver:DeleteSession before the close keeps the next call clean.
+   */
+  async end(): Promise<void> {
+    if (this.#closed) return
+    try {
+      await this.command('WebDriver:DeleteSession', {}, 3000)
+    } catch {
+      // Best effort: closing still has to happen.
+    }
+    this.close()
   }
 
   close(): void {

@@ -82,6 +82,8 @@ export class BidiClient {
   #nextId = 1
   readonly #pending = new Map<number, Pending>()
   readonly #events: BidiEvent[] = []
+  /** Event names already subscribed on this socket; subscribing again is a no-op. */
+  readonly #subscribed = new Set<string>()
   #sessionId: string | null = null
 
   async connect(port = 9222, timeoutMs = 20000): Promise<void> {
@@ -126,6 +128,15 @@ export class BidiClient {
       }
     })
 
+    ws.on('close', () => {
+      // Drop the reference so the next call reports "not connected" instead of
+      // timing out against a socket that will never answer.
+      if (this.#ws === ws) this.#ws = null
+    })
+    ws.on('error', () => {
+      if (this.#ws === ws) this.#ws = null
+    })
+
     this.#ws = ws
     const result = (await this.call('session.new', { capabilities: {} })) as { sessionId?: string }
     this.#sessionId = result?.sessionId ?? null
@@ -133,7 +144,13 @@ export class BidiClient {
 
   call(method: string, params: Record<string, unknown> = {}, timeoutMs = 30000): Promise<unknown> {
     const ws = this.#ws
-    if (ws === null) return Promise.reject(new Error('BiDi is not connected'))
+    // A socket can be dead while the object is still around (Firefox killed,
+    // connection reset). Writing into it looks exactly like a hung browser:
+    // every command waits for its full timeout and nothing ever reconnects.
+    // Report it as "not connected" so the caller can reopen the session.
+    if (ws === null || ws.readyState !== WebSocket.OPEN) {
+      return Promise.reject(new Error('BiDi is not connected'))
+    }
     const id = this.#nextId++
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -168,17 +185,36 @@ export class BidiClient {
    * unavailable.
    */
   async pageContext(): Promise<string | null> {
-    const result = (await this.call('browsingContext.getTree', { maxDepth: 1 })) as {
-      contexts?: Array<{ context?: string; clientWindow?: string }>
+    // Both calls are independent, so issuing them together removes one round
+    // trip from EVERY tool call that does not pass an explicit context.
+    const [treeResult, windowsResult] = await Promise.all([
+      this.call('browsingContext.getTree', { maxDepth: 1 }).catch(() => null) as Promise<{
+        contexts?: Array<{ context?: string; clientWindow?: string }>
+      } | null>,
+      this.call('browser.getClientWindows', {}).catch(() => null) as Promise<{
+        clientWindows?: Array<{ clientWindow?: string; active?: boolean }>
+      } | null>,
+    ])
+    // A failed getTree used to surface only as "no page context available",
+    // hiding the real cause (busy parent process, briefly dead socket). Retry
+    // once, then say what actually happened.
+    let tree = treeResult
+    if (tree === null) {
+      tree = (await this.call('browsingContext.getTree', { maxDepth: 1 }).catch(() => null)) as
+        | { contexts?: Array<{ context?: string; clientWindow?: string }> }
+        | null
     }
-    const all = result?.contexts ?? []
+    if (tree === null) {
+      throw new Error('browsingContext.getTree failed twice; the page context could not be resolved')
+    }
+    const all = tree.contexts ?? []
+    // Fast path: a single tab cannot be ambiguous, so the client-window guess
+    // and the per-tab visibility probe are pure overhead (2+ round trips).
+    if (all.length === 1 && all[0]?.context !== undefined) return all[0].context
 
     let activeWindow: string | null = null
     try {
-      const windows = (await this.call('browser.getClientWindows', {})) as {
-        clientWindows?: Array<{ clientWindow?: string; active?: boolean }>
-      }
-      activeWindow = windows?.clientWindows?.find((item) => item.active === true)?.clientWindow ?? null
+      activeWindow = windowsResult?.clientWindows?.find((item) => item.active === true)?.clientWindow ?? null
     } catch {
       // Older Firefox may not expose client windows; fall back to tab order.
     }
@@ -187,15 +223,27 @@ export class BidiClient {
       activeWindow === null ? [] : all.filter((item) => item.clientWindow === activeWindow)
     const candidates = inActiveWindow.length > 0 ? inActiveWindow : all
 
-    for (const item of candidates) {
-      if (item.context === undefined) continue
-      try {
-        const visible = await this.evaluate("document.visibilityState === 'visible'", item.context)
-        if (visible === true) return item.context
-      } catch {
-        // A tab can be closing or unresponsive; try the next one.
-      }
-    }
+    // Probe every candidate at once: with N tabs the serial version cost N
+    // round trips before returning, and this path runs on every tool call that
+    // does not pass an explicit context. Each probe is capped at 3s so one
+    // unresponsive tab cannot hold the whole call.
+    const probes = await Promise.all(
+      candidates.map(async (item) => {
+        if (item.context === undefined) return { context: null, visible: false }
+        try {
+          const visible = await Promise.race([
+            this.evaluate("document.visibilityState === 'visible'", item.context),
+            new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 3000)),
+          ])
+          return { context: item.context, visible: visible === true }
+        } catch {
+          // A tab can be closing or unresponsive; treat it as not visible.
+          return { context: item.context, visible: false }
+        }
+      }),
+    )
+    const firstVisible = probes.find((probe) => probe.visible)
+    if (firstVisible?.context != null) return firstVisible.context
     return candidates[0]?.context ?? all[0]?.context ?? null
   }
 
@@ -304,9 +352,25 @@ export class BidiClient {
     return result?.clientWindows ?? []
   }
 
-  /** Navigate the given context and wait for load. */
-  async navigate(url: string, context: string): Promise<void> {
-    await this.call('browsingContext.navigate', { context, url, wait: 'complete' }, 60000)
+  /**
+   * Navigate the given context.
+   *
+   * `wait` matters for URLs that end in a download or a cross-origin redirect:
+   * those never reach `complete`, so BiDi cancels the navigation and reports
+   * NS_BINDING_ABORTED. Pass `none` for those and poll the outcome instead.
+   */
+  async navigate(url: string, context: string, wait: 'none' | 'interactive' | 'complete' = 'complete'): Promise<{ aborted: boolean }> {
+    try {
+      await this.call('browsingContext.navigate', { context, url, wait }, 60000)
+      return { aborted: false }
+    } catch (err) {
+      // BiDi reports NS_BINDING_ABORTED when the navigation is cancelled by
+      // the browser itself. A download-triggering URL does exactly that: the
+      // request is handed to the download manager and no document ever loads.
+      // Surface it as data instead of an exception; callers decide.
+      if (/NS_BINDING_ABORTED/.test(String(err))) return { aborted: true }
+      throw err
+    }
   }
 
   /** Top-level contexts (tabs), in browser order. */
@@ -314,18 +378,21 @@ export class BidiClient {
     const result = (await this.call('browsingContext.getTree', { maxDepth: 1 })) as {
       contexts?: Array<{ context: string; url?: string; children?: unknown[] }>
     }
-    const tabs: Array<{ context: string; url?: string; title?: string }> = []
-    for (const item of result?.contexts ?? []) {
-      let title: string | undefined
-      try {
-        const value = await this.evaluate('document.title', item.context)
-        if (typeof value === 'string') title = value
-      } catch {
-        // A tab can be closed or still loading between calls; leave the title out.
-      }
-      tabs.push({ context: item.context, url: item.url, title })
-    }
-    return tabs
+    // Titles were fetched one tab at a time: with N tabs that is N round trips
+    // in series. They are independent, so fetch them together — a tab that
+    // closes mid-flight just loses its title, which the catch below keeps local.
+    return await Promise.all(
+      (result?.contexts ?? []).map(async (item) => {
+        let title: string | undefined
+        try {
+          const value = await this.evaluate('document.title', item.context)
+          if (typeof value === 'string') title = value
+        } catch {
+          // A tab can be closed or still loading between calls; leave the title out.
+        }
+        return { context: item.context, url: item.url, title }
+      }),
+    )
   }
 
   /**
@@ -355,14 +422,21 @@ export class BidiClient {
    */
   async typeInto(selector: string, textToType: string, context: string): Promise<void> {
     await this.clickSelector(selector, context)
-    const actions = [...textToType].map((character) => [
-      { type: 'keyDown' as const, value: character },
-      { type: 'keyUp' as const, value: character },
-    ]).flat()
-    await this.call('input.performActions', {
-      context,
-      actions: [{ type: 'key', id: 'keyboard', actions }],
-    })
+    // Every character costs TWO actions. A 10k-character paste would otherwise
+    // become a single ~20k-action BiDi message; send it in bounded batches so
+    // the request size stays predictable.
+    const BATCH = 200
+    const characters = [...textToType]
+    for (let at = 0; at < characters.length; at += BATCH) {
+      const actions = characters.slice(at, at + BATCH).flatMap((character) => [
+        { type: 'keyDown' as const, value: character },
+        { type: 'keyUp' as const, value: character },
+      ])
+      await this.call('input.performActions', {
+        context,
+        actions: [{ type: 'key', id: 'keyboard', actions }],
+      })
+    }
   }
 
   /**
@@ -588,9 +662,22 @@ export class BidiClient {
     return released
   }
 
-  /** Subscribe to server-pushed events (idempotent per event name). */
+  /**
+   * Subscribe to server-pushed events (idempotent per event name).
+   *
+   * The dedupe is a cheap safeguard, NOT a workaround for a reproducible
+   * protocol bug: a bare BiDi session can repeat session.subscribe for an
+   * event it already watches and still answers in about 2ms (measured
+   * against Firefox 160.0b5, both idle and while a page was loading).
+   * It is kept because re-sending a command whose effect is already in
+   * place buys nothing and costs a round trip whenever the parent process
+   * happens to be busy.
+   */
   async subscribe(events: string[]): Promise<void> {
-    await this.call('session.subscribe', { events })
+    const fresh = events.filter((event) => !this.#subscribed.has(event))
+    if (fresh.length === 0) return
+    await this.call('session.subscribe', { events: fresh })
+    for (const event of fresh) this.#subscribed.add(event)
   }
 
   /** Buffered events, newest last. `method` filters by exact name when given. */
@@ -605,6 +692,7 @@ export class BidiClient {
       // Ending the session is best-effort; the socket still gets closed.
     }
     this.#sessionId = null
+    this.#subscribed.clear()
     this.#ws?.close()
     this.#ws = null
   }
