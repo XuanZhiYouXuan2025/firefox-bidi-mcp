@@ -45,7 +45,7 @@ netstat -ano | grep LISTENING | grep ':9222'
 ```powershell
 # 列出占着会话的 MCP 进程（比对启动时间与 Firefox 的先后）
 Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
-  Where-Object { $_.CommandLine -like '*DSHBrowserMCP*' } |
+  Where-Object { $_.CommandLine -like '*dist\index.js*' } |
   Select-Object ProcessId, CreationDate
 ```
 

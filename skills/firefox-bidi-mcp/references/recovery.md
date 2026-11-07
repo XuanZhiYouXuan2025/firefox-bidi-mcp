@@ -22,7 +22,7 @@ MCP 进程占着，处理它比重启便宜。
 
 ```powershell
 Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
-  Where-Object { $_.CommandLine -like '*DSHBrowserMCP*' } |
+  Where-Object { $_.CommandLine -like '*dist\index.js*' } |
   Select-Object ProcessId, CreationDate
 ```
 
